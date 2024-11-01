@@ -1,7 +1,14 @@
 use std::net::TcpListener;
 
-fn main() {
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+use redis_starter_rust::handle_connection;
 
-    for _ in listener.incoming() {}
+fn main() -> anyhow::Result<()> {
+    let listener = TcpListener::bind("127.0.0.1:6379")?;
+
+    for stream in listener.incoming() {
+        let stream = stream?;
+        handle_connection(stream)?;
+    }
+
+    Ok(())
 }
