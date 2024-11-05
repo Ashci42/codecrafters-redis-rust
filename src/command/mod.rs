@@ -1,5 +1,7 @@
+mod argument;
 mod resp;
 
+pub use argument::SetArguments;
 pub use resp::{AsyncSequenceReader, NextSequenceError, Resp};
 
 use resp::{RespBuilder, RespError};
@@ -7,6 +9,8 @@ use resp::{RespBuilder, RespError};
 pub enum Command {
     Ping,
     Echo(String),
+    Set(SetArguments),
+    Get(String),
 }
 
 impl TryFrom<Resp> for Command {
@@ -21,13 +25,42 @@ impl TryFrom<Resp> for Command {
                     Resp::BulkString(bulk_string) => match bulk_string.to_lowercase().as_str() {
                         "ping" => Ok(Command::Ping),
                         "echo" => {
-                            let echo = resp_iter
-                                .next()
-                                .ok_or(CommandParseError::MissingEchoArgument)?;
+                            let echo =
+                                resp_iter.next().ok_or(CommandParseError::MissingArgument)?;
 
                             match echo {
                                 Resp::BulkString(bulk_string) => Ok(Command::Echo(bulk_string)),
-                                _ => Err(CommandParseError::EchoArgument),
+                                _ => Err(CommandParseError::ArgumentType),
+                            }
+                        }
+                        "set" => {
+                            let key = resp_iter.next().ok_or(CommandParseError::MissingArgument)?;
+                            let key = match key {
+                                Resp::BulkString(bulk_string) => bulk_string,
+                                _ => {
+                                    return Err(CommandParseError::ArgumentType);
+                                }
+                            };
+
+                            let value =
+                                resp_iter.next().ok_or(CommandParseError::MissingArgument)?;
+                            let value = match value {
+                                Resp::BulkString(bulk_string) => bulk_string,
+                                _ => {
+                                    return Err(CommandParseError::ArgumentType);
+                                }
+                            };
+
+                            let set_arguments = SetArguments::new(key, value);
+
+                            Ok(Command::Set(set_arguments))
+                        }
+                        "get" => {
+                            let key = resp_iter.next().ok_or(CommandParseError::MissingArgument)?;
+
+                            match key {
+                                Resp::BulkString(bulk_string) => Ok(Command::Get(bulk_string)),
+                                _ => Err(CommandParseError::ArgumentType),
                             }
                         }
                         _ => Err(CommandParseError::UnknownCommandName(bulk_string)),
@@ -82,8 +115,8 @@ pub enum CommandParseError {
     CommandName,
     #[error("Command {0} is not known")]
     UnknownCommandName(String),
-    #[error("Command ECHO requires an argument")]
-    MissingEchoArgument,
-    #[error("Argument for ECHO should be a bulk string")]
-    EchoArgument,
+    #[error("The argument type for the command is wrong")]
+    ArgumentType,
+    #[error("Command is missing required arguments")]
+    MissingArgument,
 }

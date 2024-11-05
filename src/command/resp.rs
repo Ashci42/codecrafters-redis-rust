@@ -13,6 +13,7 @@ pub enum Resp {
     Array(Vec<Resp>),
     BulkString(String),
     SimpleString(String),
+    NullBulkString,
 }
 
 impl From<Resp> for Bytes {
@@ -41,6 +42,7 @@ impl From<Resp> for Bytes {
 
                 b.into()
             }
+            Resp::NullBulkString => Bytes::from("$-1\r\n"),
             _ => unimplemented!(),
         }
     }
