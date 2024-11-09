@@ -1,7 +1,7 @@
 mod command;
 mod store;
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use command::{
@@ -23,6 +23,8 @@ where
 
 pub async fn run(addr: &str) -> anyhow::Result<()> {
     let store = Arc::new(tokio::sync::Mutex::new(Store::new()));
+    
+    spawn_cleanup_thread(store.clone());
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
@@ -103,7 +105,7 @@ where
     W: AsyncWriteExt + Unpin,
 {
     let mut store = store.lock().await;
-    store.set(set_arguments.key, set_arguments.value);
+    store.set(set_arguments.key, set_arguments.value, set_arguments.px);
     drop(store);
 
     let response = Resp::SimpleString("OK".into());
@@ -118,7 +120,7 @@ async fn handle_get<W>(writer: &mut W, key: String, store: &mut StoreArc) -> any
 where
     W: AsyncWriteExt + Unpin,
 {
-    let store = store.lock().await;
+    let mut store = store.lock().await;
     let value = store.get(&key).cloned();
     drop(store);
 
@@ -138,4 +140,16 @@ where
     };
 
     Ok(())
+}
+
+fn spawn_cleanup_thread(store: StoreArc) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+
+        loop {
+            interval.tick().await;
+            let mut store = store.lock().await;
+            store.clean_expired_keys();
+        }
+    });
 }

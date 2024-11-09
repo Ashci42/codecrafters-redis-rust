@@ -27,41 +27,48 @@ impl TryFrom<Resp> for Command {
                         "echo" => {
                             let echo =
                                 resp_iter.next().ok_or(CommandParseError::MissingArgument)?;
+                            let echo = extract_bulk_string(echo)?;
 
-                            match echo {
-                                Resp::BulkString(bulk_string) => Ok(Command::Echo(bulk_string)),
-                                _ => Err(CommandParseError::ArgumentType),
-                            }
+                            Ok(Command::Echo(echo))
                         }
                         "set" => {
                             let key = resp_iter.next().ok_or(CommandParseError::MissingArgument)?;
-                            let key = match key {
-                                Resp::BulkString(bulk_string) => bulk_string,
-                                _ => {
-                                    return Err(CommandParseError::ArgumentType);
-                                }
-                            };
+                            let key = extract_bulk_string(key)?;
 
                             let value =
                                 resp_iter.next().ok_or(CommandParseError::MissingArgument)?;
-                            let value = match value {
-                                Resp::BulkString(bulk_string) => bulk_string,
-                                _ => {
-                                    return Err(CommandParseError::ArgumentType);
-                                }
-                            };
+                            let value = extract_bulk_string(value)?;
 
-                            let set_arguments = SetArguments::new(key, value);
+                            let mut set_arguments = SetArguments::new(key, value);
+
+                            while let Some(arg) = resp_iter.next() {
+                                let arg = extract_bulk_string(arg)?;
+
+                                match arg.to_lowercase().as_str() {
+                                    "px" => {
+                                        let px = resp_iter
+                                            .next()
+                                            .ok_or(CommandParseError::MissingArgument)?;
+                                        let px = extract_bulk_string(px)?;
+                                        let px: u128 = px
+                                            .parse()
+                                            .map_err(|_| CommandParseError::ArgumentType)?;
+
+                                        set_arguments.px = Some(px);
+                                    }
+                                    _ => {
+                                        return Err(CommandParseError::UnknownArgument);
+                                    }
+                                }
+                            }
 
                             Ok(Command::Set(set_arguments))
                         }
                         "get" => {
                             let key = resp_iter.next().ok_or(CommandParseError::MissingArgument)?;
+                            let key = extract_bulk_string(key)?;
 
-                            match key {
-                                Resp::BulkString(bulk_string) => Ok(Command::Get(bulk_string)),
-                                _ => Err(CommandParseError::ArgumentType),
-                            }
+                            Ok(Command::Get(key))
                         }
                         _ => Err(CommandParseError::UnknownCommandName(bulk_string)),
                     },
@@ -119,4 +126,13 @@ pub enum CommandParseError {
     ArgumentType,
     #[error("Command is missing required arguments")]
     MissingArgument,
+    #[error("The argument passed to this command is not known")]
+    UnknownArgument,
+}
+
+fn extract_bulk_string(resp: Resp) -> Result<String, CommandParseError> {
+    match resp {
+        Resp::BulkString(bulk_string) => Ok(bulk_string),
+        _ => Err(CommandParseError::ArgumentType),
+    }
 }
