@@ -11,67 +11,75 @@ pub enum Command {
     Echo(String),
     Set(SetArguments),
     Get(String),
+    ConfigGet(String),
 }
 
 impl TryFrom<Resp> for Command {
     type Error = CommandParseError;
 
     fn try_from(value: Resp) -> Result<Self, Self::Error> {
+        println!("{value:#?}");
         match value {
             Resp::Array(array) => {
                 let mut resp_iter = array.into_iter();
                 let command_name = resp_iter.next().ok_or(CommandParseError::EmptyRespArray)?;
                 match command_name {
-                    Resp::BulkString(bulk_string) => match bulk_string.to_lowercase().as_str() {
-                        "ping" => Ok(Command::Ping),
-                        "echo" => {
-                            let echo =
-                                resp_iter.next().ok_or(CommandParseError::MissingArgument)?;
-                            let echo = extract_bulk_string(echo)?;
+                    Resp::BulkString(bulk_string) => {
+                        match bulk_string.to_lowercase().as_str() {
+                            "ping" => Ok(Command::Ping),
+                            "echo" => {
+                                let echo = next_bulk_string(&mut resp_iter)?;
 
-                            Ok(Command::Echo(echo))
-                        }
-                        "set" => {
-                            let key = resp_iter.next().ok_or(CommandParseError::MissingArgument)?;
-                            let key = extract_bulk_string(key)?;
+                                Ok(Command::Echo(echo))
+                            }
+                            "set" => {
+                                let key = next_bulk_string(&mut resp_iter)?;
+                                let value = next_bulk_string(&mut resp_iter)?;
 
-                            let value =
-                                resp_iter.next().ok_or(CommandParseError::MissingArgument)?;
-                            let value = extract_bulk_string(value)?;
+                                let mut set_arguments = SetArguments::new(key, value);
 
-                            let mut set_arguments = SetArguments::new(key, value);
+                                while let Some(arg) = resp_iter.next() {
+                                    let arg = extract_bulk_string(arg)?;
 
-                            while let Some(arg) = resp_iter.next() {
-                                let arg = extract_bulk_string(arg)?;
+                                    match arg.to_lowercase().as_str() {
+                                        "px" => {
+                                            let px = next_bulk_string(&mut resp_iter)?;
+                                            let px: u128 = px
+                                                .parse()
+                                                .map_err(|_| CommandParseError::ArgumentType)?;
 
-                                match arg.to_lowercase().as_str() {
-                                    "px" => {
-                                        let px = resp_iter
-                                            .next()
-                                            .ok_or(CommandParseError::MissingArgument)?;
-                                        let px = extract_bulk_string(px)?;
-                                        let px: u128 = px
-                                            .parse()
-                                            .map_err(|_| CommandParseError::ArgumentType)?;
-
-                                        set_arguments.px = Some(px);
-                                    }
-                                    _ => {
-                                        return Err(CommandParseError::UnknownArgument);
+                                            set_arguments.px = Some(px);
+                                        }
+                                        _ => {
+                                            return Err(CommandParseError::UnknownArgument);
+                                        }
                                     }
                                 }
+
+                                Ok(Command::Set(set_arguments))
                             }
+                            "get" => {
+                                let key = next_bulk_string(&mut resp_iter)?;
 
-                            Ok(Command::Set(set_arguments))
-                        }
-                        "get" => {
-                            let key = resp_iter.next().ok_or(CommandParseError::MissingArgument)?;
-                            let key = extract_bulk_string(key)?;
+                                Ok(Command::Get(key))
+                            }
+                            "config" => {
+                                let subcommand = resp_iter.next().ok_or(
+                                    CommandParseError::UnknownCommandName(String::from("config")),
+                                )?;
+                                let subcommand = extract_bulk_string(subcommand)?;
+                                match subcommand.to_lowercase().as_str() {
+                                    "get" => {
+                                        let key = next_bulk_string(&mut resp_iter)?;
 
-                            Ok(Command::Get(key))
+                                        Ok(Command::ConfigGet(key))
+                                    }
+                                    _ => Err(CommandParseError::UnknownCommandName(subcommand)),
+                                }
+                            }
+                            _ => Err(CommandParseError::UnknownCommandName(bulk_string)),
                         }
-                        _ => Err(CommandParseError::UnknownCommandName(bulk_string)),
-                    },
+                    }
                     _ => Err(CommandParseError::CommandName),
                 }
             }
@@ -135,4 +143,14 @@ fn extract_bulk_string(resp: Resp) -> Result<String, CommandParseError> {
         Resp::BulkString(bulk_string) => Ok(bulk_string),
         _ => Err(CommandParseError::ArgumentType),
     }
+}
+
+fn next_bulk_string<I>(resp_iter: &mut I) -> Result<String, CommandParseError>
+where
+    I: Iterator<Item = Resp>,
+{
+    let resp = resp_iter.next().ok_or(CommandParseError::MissingArgument)?;
+    let bulk_string = extract_bulk_string(resp)?;
+
+    Ok(bulk_string)
 }

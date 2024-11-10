@@ -1,5 +1,8 @@
 mod command;
+mod config;
 mod store;
+
+pub use config::Config;
 
 use std::{sync::Arc, time::Duration};
 
@@ -21,12 +24,20 @@ where
     }
 }
 
-pub async fn run(addr: &str) -> anyhow::Result<()> {
-    let store = Arc::new(tokio::sync::Mutex::new(Store::new()));
-    
+pub async fn run<'a>(config: &Config<'a>) -> anyhow::Result<()> {
+    let mut store = Store::new();
+    if let Some(rdb_dir) = config.rdb_dir {
+        store.set_rdb_dir(rdb_dir.to_path_buf());
+    }
+    if let Some(rdb_file_name) = config.rdb_file_name {
+        store.set_rdb_file_name(rdb_file_name.to_string());
+    }
+
+    let store = Arc::new(tokio::sync::Mutex::new(store));
+
     spawn_cleanup_thread(store.clone());
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let listener = tokio::net::TcpListener::bind(config.addr).await?;
 
     loop {
         let (stream, _) = listener.accept().await?;
@@ -67,6 +78,7 @@ where
         Command::Echo(echo) => handle_echo(writer, echo).await?,
         Command::Set(set_arguments) => handle_set(writer, set_arguments, store).await?,
         Command::Get(key) => handle_get(writer, key, store).await?,
+        Command::ConfigGet(key) => handle_config_get(writer, key, store).await?,
     }
 
     Ok(())
@@ -152,4 +164,30 @@ fn spawn_cleanup_thread(store: StoreArc) {
             store.clean_expired_keys();
         }
     });
+}
+
+async fn handle_config_get<W>(
+    writer: &mut W,
+    key: String,
+    store: &mut StoreArc,
+) -> anyhow::Result<()>
+where
+    W: AsyncWriteExt + Unpin,
+{
+    let store = store.lock().await;
+    let config_value = store
+        .get_config(&key)
+        .map(|config_value| config_value.to_string());
+    drop(store);
+
+    let resp_config_value = match config_value {
+        Some(config_value) => Resp::BulkString(config_value),
+        None => Resp::NullBulkString,
+    };
+    let response = Resp::Array(vec![Resp::BulkString(key), resp_config_value]);
+    let response: Bytes = response.into();
+
+    writer.write_all(&response).await?;
+
+    Ok(())
 }

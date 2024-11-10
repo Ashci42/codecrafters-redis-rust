@@ -43,7 +43,18 @@ impl From<Resp> for Bytes {
                 b.into()
             }
             Resp::NullBulkString => Bytes::from("$-1\r\n"),
-            _ => unimplemented!(),
+            Resp::Array(array) => {
+                let mut b = BytesMut::new();
+                b.put_u8(b'*');
+                b.put_slice(array.len().to_string().as_bytes());
+                b.put_slice(b"\r\n");
+                for item in array {
+                    let item_bytes: Bytes = item.into();
+                    b.put_slice(&item_bytes);
+                }
+
+                b.into()
+            }
         }
     }
 }

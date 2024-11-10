@@ -1,14 +1,18 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 pub struct Store {
     cache: HashMap<String, Value>,
+    config: Config,
 }
 
 impl Store {
     pub fn new() -> Self {
         let cache = HashMap::new();
 
-        Self { cache }
+        Self {
+            cache,
+            config: Config::new(),
+        }
     }
 
     pub fn set(&mut self, key: String, value: String, px: Option<u128>) {
@@ -37,6 +41,26 @@ impl Store {
 
     pub fn clean_expired_keys(&mut self) {
         self.cache.retain(|_, value| !value.has_expired());
+    }
+
+    pub fn set_rdb_dir(&mut self, rdb_dir: PathBuf) {
+        self.config.rdb_dir = Some(rdb_dir);
+    }
+
+    pub fn set_rdb_file_name(&mut self, rdb_file_name: String) {
+        self.config.rdb_file_name = Some(rdb_file_name);
+    }
+
+    pub fn get_config(&self, key: &str) -> Option<&str> {
+        match key {
+            "dir" => self
+                .config
+                .rdb_dir
+                .as_ref()
+                .and_then(|rdb_dir| rdb_dir.to_str()),
+            "dbfilename" => self.config.rdb_file_name.as_deref(),
+            _ => None,
+        }
     }
 }
 
@@ -78,5 +102,19 @@ impl Px {
 
     fn has_expired(&self) -> bool {
         self.instant.elapsed().as_millis() > self.miliseconds
+    }
+}
+
+struct Config {
+    rdb_dir: Option<PathBuf>,
+    rdb_file_name: Option<String>,
+}
+
+impl Config {
+    fn new() -> Self {
+        Self {
+            rdb_dir: None,
+            rdb_file_name: None,
+        }
     }
 }
